@@ -1,0 +1,54 @@
+name: Build,Push,Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: ${{ secrets.GKE_PROJECT }}
+  GKE_CLUSTER: <YOUR_GKE_CLUSTER_NAME> 
+  DEPLOYMENT_NAME: python-app 
+  IMAGE: python-app
+  GKE_ZONE: asia-south1-a 
+
+jobs:
+  setup-build-publish-deploy:
+    name: Setup, Build, Publish, and Deploy
+    runs-on: ubuntu-latest
+    environment: Dev
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - id: 'auth'
+      name: 'Authenticate to google cloud'
+      uses: 'google-github-actions/auth@v0.4.0'
+      with:
+        token_format: 'access_token'   
+        workload_identity_provider: ${{ secrets.WIP }}  
+        service_account: ${{ secrets.SERVICE_ACCOUNT }}
+      
+   
+    - name: Docker Auth
+      run: gcloud auth configure-docker
+   
+    - name: Build and push docker images
+      run: |
+        docker build --tag "gcr.io/$PROJECT_ID/$IMAGE:$GITHUB_SHA" .
+        docker push "gcr.io/$PROJECT_ID/$IMAGE:$GITHUB_SHA"
+        
+    - id: get-gke-credentials
+      uses: 'google-github-actions/get-gke-credentials@v1'
+      with:
+       cluster_name: ${{ env.GKE_CLUSTER }}
+       location: ${{ env.GKE_ZONE }}    
+ 
+    - name: Deploy
+      run: |-
+        sed -i -e 's/GITHUB_SHA/'"$GITHUB_SHA"'/' ${{ github.workspace }}/.github/manifests/deployment.yaml
+        kubectl apply -f ${{ github.workspace }}/.github/manifests/deployment.yaml
